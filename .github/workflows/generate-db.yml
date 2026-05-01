@@ -2,8 +2,8 @@ name: Generate DB
 
 on:
   schedule:
-    - cron: '0 0 1 * *'
-  workflow_dispatch:
+    - cron: '0 0 1 * *'   # primer día de cada mes
+  workflow_dispatch:       # permite ejecución manual
 
 jobs:
   build:
@@ -18,17 +18,17 @@ jobs:
 
       - name: Download Redump datfiles
         run: |
-          mkdir -p POPSManager.DBGenerator/Data
-          wget -O POPSManager.DBGenerator/Data/psx.dat "http://redump.org/datfile/psx/"
-          wget -O POPSManager.DBGenerator/Data/ps2.dat "http://redump.org/datfile/ps2/"
+          mkdir -p Data
+          wget -O Data/psx.dat "http://redump.org/datfile/psx/"
+          wget -O Data/ps2.dat "http://redump.org/datfile/ps2/"
 
       - name: Download OPL CFG Database
-  run: |
-    wget -O opl-manager.zip "https://github.com/opl-manager/OPL-Manager/archive/refs/heads/main.zip"
-    unzip opl-manager.zip
-    mkdir -p POPSManager.DBGenerator/Data/cfg_database
-    # Ruta dentro del ZIP (ajústala si es diferente, puede ser "OPL-Manager-main/CFG")
-    cp -r OPL-Manager-main/client/CFG/* POPSManager.DBGenerator/Data/cfg_database/
+        run: |
+          wget -O opl-manager.zip "https://github.com/opl-manager/OPL-Manager/archive/refs/heads/main.zip"
+          unzip opl-manager.zip
+          mkdir -p Data/cfg_database
+          # Ajusta la ruta si no existe client/CFG; a veces es directamente CFG/
+          cp -r OPL-Manager-main/client/CFG/* Data/cfg_database/ 2>/dev/null || cp -r OPL-Manager-main/CFG/* Data/cfg_database/
 
       - name: Run generator
         run: dotnet run --project POPSManager.DBGenerator
