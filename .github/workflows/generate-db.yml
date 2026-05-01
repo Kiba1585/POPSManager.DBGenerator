@@ -23,11 +23,12 @@ jobs:
           wget -O POPSManager.DBGenerator/Data/ps2.dat "http://redump.org/datfile/ps2/"
 
       - name: Download OPL CFG Database
-        run: |
-          wget -O cfg.zip "https://github.com/opl-manager/PS2-OPL-CFG-Database/archive/refs/heads/master.zip"
-          unzip cfg.zip
-          mkdir -p POPSManager.DBGenerator/Data/cfg_database
-          cp -r PS2-OPL-CFG-Database-master/client/CFG/* POPSManager.DBGenerator/Data/cfg_database/
+  run: |
+    wget -O opl-manager.zip "https://github.com/opl-manager/OPL-Manager/archive/refs/heads/main.zip"
+    unzip opl-manager.zip
+    mkdir -p POPSManager.DBGenerator/Data/cfg_database
+    # Ruta dentro del ZIP (ajústala si es diferente, puede ser "OPL-Manager-main/CFG")
+    cp -r OPL-Manager-main/client/CFG/* POPSManager.DBGenerator/Data/cfg_database/
 
       - name: Run generator
         run: dotnet run --project POPSManager.DBGenerator
