@@ -4,9 +4,9 @@ using System.Xml;
 
 const string dataPath = "Data";
 const string outputPath = "Output";
-const string cfgSourceDir = Path.Combine(dataPath, "cfg_database");
-const string ps1DatFile = Path.Combine(dataPath, "psx.dat");
-const string ps2DatFile = Path.Combine(dataPath, "ps2.dat");
+string cfgSourceDir = Path.Combine(dataPath, "cfg_database");
+string ps1DatFile = Path.Combine(dataPath, "psx.dat");
+string ps2DatFile = Path.Combine(dataPath, "ps2.dat");
 const string coverArtBaseUrl = "ART/";
 
 Directory.CreateDirectory(outputPath);
