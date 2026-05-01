@@ -2,8 +2,8 @@ name: Generate DB
 
 on:
   schedule:
-    - cron: '0 0 1 * *'   # Se ejecuta el día 1 de cada mes
-  workflow_dispatch:       # Permite ejecución manual desde la pestaña Actions
+    - cron: '0 0 1 * *'   # el día 1 de cada mes
+  workflow_dispatch:       # permite ejecución manual desde Actions
 
 jobs:
   build:
@@ -16,11 +16,9 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Download Redump datfiles
-        run: |
-          mkdir -p Data
-          wget -O Data/psx.dat "http://redump.org/datfile/psx/"
-          wget -O Data/ps2.dat "http://redump.org/datfile/ps2/"
+      # Los datfiles ya están en el repositorio (Data/psx.dat y Data/ps2.dat)
+      - name: Datfiles already in repository
+        run: echo "Usando datfiles locales en POPSManager.DBGenerator/Data/"
 
       - name: Download OPL CFG Database
         run: |
