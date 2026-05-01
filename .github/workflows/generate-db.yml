@@ -1,0 +1,39 @@
+name: Generate DB
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Download Redump datfiles
+        run: |
+          mkdir -p POPSManager.DBGenerator/Data
+          wget -O POPSManager.DBGenerator/Data/psx.dat "http://redump.org/datfile/psx/"
+          wget -O POPSManager.DBGenerator/Data/ps2.dat "http://redump.org/datfile/ps2/"
+
+      - name: Download OPL CFG Database
+        run: |
+          wget -O cfg.zip "https://github.com/opl-manager/PS2-OPL-CFG-Database/archive/refs/heads/master.zip"
+          unzip cfg.zip
+          mkdir -p POPSManager.DBGenerator/Data/cfg_database
+          cp -r PS2-OPL-CFG-Database-master/client/CFG/* POPSManager.DBGenerator/Data/cfg_database/
+
+      - name: Run generator
+        run: dotnet run --project POPSManager.DBGenerator
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: db-${{ github.run_number }}
+          files: POPSManager_DB.zip
