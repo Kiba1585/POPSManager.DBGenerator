@@ -2,8 +2,8 @@ name: Generate DB
 
 on:
   schedule:
-    - cron: '0 0 1 * *'   # primer día de cada mes
-  workflow_dispatch:       # permite ejecución manual
+    - cron: '0 0 1 * *'   # Se ejecuta el día 1 de cada mes
+  workflow_dispatch:       # Permite ejecución manual desde la pestaña Actions
 
 jobs:
   build:
@@ -24,11 +24,10 @@ jobs:
 
       - name: Download OPL CFG Database
         run: |
-          wget -O opl-manager.zip "https://github.com/opl-manager/OPL-Manager/archive/refs/heads/main.zip"
-          unzip opl-manager.zip
+          wget -O cfg.zip "https://github.com/Tom-Bruise/PS2-OPL-CFG-Database/archive/refs/heads/master.zip"
+          unzip cfg.zip
           mkdir -p Data/cfg_database
-          # Ajusta la ruta si no existe client/CFG; a veces es directamente CFG/
-          cp -r OPL-Manager-main/client/CFG/* Data/cfg_database/ 2>/dev/null || cp -r OPL-Manager-main/CFG/* Data/cfg_database/
+          cp -r PS2-OPL-CFG-Database-master/CFG_en/* Data/cfg_database/
 
       - name: Run generator
         run: dotnet run --project POPSManager.DBGenerator
