@@ -33,26 +33,20 @@ public class OutputBuilder
     {
         var indexData = new Dictionary<string, object>();
 
-        // Separar por consola
         var ps1 = entries.Where(e => e.Console == "ps1").ToList();
         var ps2 = entries.Where(e => e.Console == "ps2").ToList();
 
-        // JSON completos
         GenerateFullJson(Path.Combine(_outputPath, "ps1db.json"), ps1);
         GenerateFullJson(Path.Combine(_outputPath, "ps2db.json"), ps2);
 
-        // Archivos individuales
         GenerateIndividualFiles(ps1, _dbPs1Dir, "ps1", indexData);
         GenerateIndividualFiles(ps2, _dbPs2Dir, "ps2", indexData);
 
-        // Índice
         string indexPath = Path.Combine(_dbOutputDir, "index.json");
         File.WriteAllText(indexPath, JsonSerializer.Serialize(indexData, new JsonSerializerOptions { WriteIndented = true }));
 
-        // Copiar CFGs
         CopyConfigFiles();
 
-        // Empaquetar
         ZipFile.CreateFromDirectory(_outputPath, "POPSManager_DB.zip", CompressionLevel.Optimal, false);
         ZipFile.CreateFromDirectory(_dbOutputDir, "POPSManager_DB_individual.zip", CompressionLevel.Optimal, false);
     }
@@ -62,12 +56,43 @@ public class OutputBuilder
         var dict = new Dictionary<string, object>();
         foreach (var g in entries)
         {
-            dict[g.GameId] = new
+            var gameObj = new Dictionary<string, object>
             {
-                name = g.TranslatedTitle ?? g.Title,
-                discNumber = g.DiscNumber,
-                coverUrl = g.CoverUrl
+                ["name"] = g.TranslatedTitle ?? g.Title,
+                ["discNumber"] = g.DiscNumber,
+                ["coverUrl"] = g.CoverUrl ?? ""
             };
+
+            // Nombres multi-idioma
+            if (g.TranslatedTitles.Count > 0)
+            {
+                var names = new Dictionary<string, string> { ["en"] = g.Title };
+                if (!string.IsNullOrEmpty(g.TranslatedTitle))
+                    names["es"] = g.TranslatedTitle;
+                foreach (var (lang, title) in g.TranslatedTitles)
+                    names[lang] = title;
+                gameObj["names"] = names;
+            }
+
+            // Metadatos CFG
+            if (!string.IsNullOrEmpty(g.Genre)) gameObj["genre"] = g.Genre;
+            if (!string.IsNullOrEmpty(g.Players)) gameObj["players"] = g.Players;
+            if (!string.IsNullOrEmpty(g.Developer)) gameObj["developer"] = g.Developer;
+            if (!string.IsNullOrEmpty(g.ReleaseDate)) gameObj["releaseDate"] = g.ReleaseDate;
+
+            // Descripción multi-idioma
+            if (!string.IsNullOrEmpty(g.Description) || g.TranslatedDescriptions.Count > 0)
+            {
+                var descriptions = new Dictionary<string, string>();
+                if (!string.IsNullOrEmpty(g.Description))
+                    descriptions["en"] = g.Description;
+                foreach (var (lang, desc) in g.TranslatedDescriptions)
+                    descriptions[lang] = desc;
+                if (descriptions.Count > 0)
+                    gameObj["description"] = descriptions.Count == 1 && descriptions.ContainsKey("en") ? descriptions["en"] : descriptions;
+            }
+
+            dict[g.GameId] = gameObj;
         }
         File.WriteAllText(filePath, JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"✔️ {filePath} generado con {dict.Count} entradas.");
@@ -77,13 +102,40 @@ public class OutputBuilder
     {
         foreach (var g in entries)
         {
-            var data = new
+            var data = new Dictionary<string, object>
             {
-                name = g.TranslatedTitle ?? g.Title,
-                discNumber = g.DiscNumber,
-                coverUrl = g.CoverUrl,
-                console
+                ["name"] = g.TranslatedTitle ?? g.Title,
+                ["discNumber"] = g.DiscNumber,
+                ["coverUrl"] = g.CoverUrl ?? "",
+                ["console"] = console
             };
+
+            // Nombres multi-idioma
+            if (g.TranslatedTitles.Count > 0)
+            {
+                var names = new Dictionary<string, string> { ["en"] = g.Title };
+                if (!string.IsNullOrEmpty(g.TranslatedTitle))
+                    names["es"] = g.TranslatedTitle;
+                foreach (var (lang, title) in g.TranslatedTitles)
+                    names[lang] = title;
+                data["names"] = names;
+            }
+
+            if (!string.IsNullOrEmpty(g.Genre)) data["genre"] = g.Genre;
+            if (!string.IsNullOrEmpty(g.Players)) data["players"] = g.Players;
+            if (!string.IsNullOrEmpty(g.Developer)) data["developer"] = g.Developer;
+            if (!string.IsNullOrEmpty(g.ReleaseDate)) data["releaseDate"] = g.ReleaseDate;
+
+            if (!string.IsNullOrEmpty(g.Description) || g.TranslatedDescriptions.Count > 0)
+            {
+                var descriptions = new Dictionary<string, string>();
+                if (!string.IsNullOrEmpty(g.Description))
+                    descriptions["en"] = g.Description;
+                foreach (var (lang, desc) in g.TranslatedDescriptions)
+                    descriptions[lang] = desc;
+                data["description"] = descriptions.Count == 1 && descriptions.ContainsKey("en") ? descriptions["en"] : descriptions;
+            }
+
             string fileName = $"{g.GameId}.json";
             string filePath = Path.Combine(outDir, fileName);
             File.WriteAllText(filePath, JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }));
