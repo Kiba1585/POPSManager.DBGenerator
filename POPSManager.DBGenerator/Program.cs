@@ -12,15 +12,22 @@ static readonly string CfgSourceDir = Path.Combine(dataPath, "cfg_database");
 static readonly string Ps1DatFile = Path.Combine(dataPath, "psx.dat");
 static readonly string Ps2DatFile = Path.Combine(dataPath, "ps2.dat");
 const string CoverArtBaseUrl = "https://archive.org/download/oplm-art-2023-11/ART/";
-
-// Archivo opcional con URLs alternativas (GameFAQs, etc.)
 static readonly string ExtraUrlsFile = Path.Combine(dataPath, "extra_urls.json");
+
+// Carpetas para archivos individuales
+static readonly string DbOutputDir = Path.Combine(outputPath, "db");
+static readonly string DbPs1Dir = Path.Combine(DbOutputDir, "ps1");
+static readonly string DbPs2Dir = Path.Combine(DbOutputDir, "ps2");
+static readonly string DbCfgDir = Path.Combine(DbOutputDir, "cfg");
 
 // --------------------------------------------------
 // 1. Preparar directorios de salida
 // --------------------------------------------------
 Directory.CreateDirectory(outputPath);
 Directory.CreateDirectory(Path.Combine(outputPath, "CFG"));
+Directory.CreateDirectory(DbPs1Dir);
+Directory.CreateDirectory(DbPs2Dir);
+Directory.CreateDirectory(DbCfgDir);
 
 // --------------------------------------------------
 // 2. Parsear datfiles de Redump
@@ -34,19 +41,31 @@ List<RedumpEntry> ps2Entries = ParseRedumpDat(Ps2DatFile);
 Dictionary<string, string> extraUrls = LoadExtraUrls(ExtraUrlsFile);
 
 // --------------------------------------------------
-// 4. Ajustar discos múltiples y URLs finales
+// 4. Ajustar discos múltiples
 // --------------------------------------------------
 ps1Entries = AdjustDiscNumbers(ps1Entries);
 ps2Entries = AdjustDiscNumbers(ps2Entries);
 
 // --------------------------------------------------
-// 5. Generar los archivos JSON mejorados
+// 5. Generar JSON completos (para el ZIP completo)
 // --------------------------------------------------
 GenerateDatabaseJson(Path.Combine(outputPath, "ps1db.json"), ps1Entries, extraUrls);
 GenerateDatabaseJson(Path.Combine(outputPath, "ps2db.json"), ps2Entries, extraUrls);
 
 // --------------------------------------------------
-// 6. Copiar archivos .cfg
+// 6. Generar índice y archivos individuales
+// --------------------------------------------------
+var indexData = new Dictionary<string, object>();
+GenerateIndividualFiles(ps1Entries, extraUrls, DbPs1Dir, "ps1", indexData);
+GenerateIndividualFiles(ps2Entries, extraUrls, DbPs2Dir, "ps2", indexData);
+
+// Guardar índice
+string indexPath = Path.Combine(DbOutputDir, "index.json");
+File.WriteAllText(indexPath, JsonSerializer.Serialize(indexData, new JsonSerializerOptions { WriteIndented = true }));
+Console.WriteLine($"✔️ Índice generado con {indexData.Count} juegos");
+
+// --------------------------------------------------
+// 7. Copiar archivos .cfg (para ZIP completo y para individual)
 // --------------------------------------------------
 if (Directory.Exists(CfgSourceDir))
 {
@@ -54,6 +73,10 @@ if (Directory.Exists(CfgSourceDir))
     {
         string destFile = Path.Combine(outputPath, "CFG", Path.GetFileName(cfgFile));
         File.Copy(cfgFile, destFile, overwrite: true);
+        
+        // También copiar a db/cfg/ para el ZIP individual
+        string indiCfgFile = Path.Combine(DbCfgDir, Path.GetFileName(cfgFile));
+        File.Copy(cfgFile, indiCfgFile, overwrite: true);
     }
 }
 else
@@ -62,20 +85,22 @@ else
 }
 
 // --------------------------------------------------
-// 7. Empaquetar en ZIP
+// 8. Empaquetar en ZIPs
 // --------------------------------------------------
-string zipPath = "POPSManager_DB.zip";
-if (File.Exists(zipPath)) File.Delete(zipPath);
-ZipFile.CreateFromDirectory(outputPath, zipPath);
-Console.WriteLine($"✅ Base de datos generada en {zipPath}");
+string fullZipPath = "POPSManager_DB.zip";
+if (File.Exists(fullZipPath)) File.Delete(fullZipPath);
+ZipFile.CreateFromDirectory(outputPath, fullZipPath, CompressionLevel.Optimal, false);
+Console.WriteLine($"✅ Base de datos completa generada en {fullZipPath}");
+
+string indiZipPath = "POPSManager_DB_individual.zip";
+if (File.Exists(indiZipPath)) File.Delete(indiZipPath);
+ZipFile.CreateFromDirectory(DbOutputDir, indiZipPath, CompressionLevel.Optimal, false);
+Console.WriteLine($"✅ Base de datos individual generada en {indiZipPath}");
 
 // ==================================================
 // MÉTODOS AUXILIARES
 // ==================================================
 
-/// <summary>
-/// Parsea un datfile de Redump y extrae GameId, título y número de disco.
-/// </summary>
 static List<RedumpEntry> ParseRedumpDat(string filePath)
 {
     var entries = new List<RedumpEntry>();
@@ -121,9 +146,6 @@ static List<RedumpEntry> ParseRedumpDat(string filePath)
     return entries;
 }
 
-/// <summary>
-/// Ajusta discos múltiples agrupando por título base y seriales consecutivos.
-/// </summary>
 static List<RedumpEntry> AdjustDiscNumbers(List<RedumpEntry> entries)
 {
     // Agrupar por título normalizado (sin versión, sin región si se desea)
@@ -147,9 +169,6 @@ static List<RedumpEntry> AdjustDiscNumbers(List<RedumpEntry> entries)
     return entries;
 }
 
-/// <summary>
-/// Normaliza el título para agrupar variantes de discos (ignora mayúsculas y ciertas palabras).
-/// </summary>
 static string NormalizeTitleForGrouping(string title)
 {
     if (string.IsNullOrWhiteSpace(title)) return "";
@@ -160,9 +179,6 @@ static string NormalizeTitleForGrouping(string title)
     return norm.Trim();
 }
 
-/// <summary>
-/// Carga URLs de carátulas alternativas desde un JSON { "GAMEID": "url" }.
-/// </summary>
 static Dictionary<string, string> LoadExtraUrls(string filePath)
 {
     if (!File.Exists(filePath))
@@ -177,24 +193,12 @@ static Dictionary<string, string> LoadExtraUrls(string filePath)
     return dict ?? new Dictionary<string, string>();
 }
 
-/// <summary>
-/// Genera el archivo JSON con las entradas de juegos, usando URLs extra si están disponibles.
-/// </summary>
 static void GenerateDatabaseJson(string outputFile, List<RedumpEntry> entries, Dictionary<string, string> extraUrls)
 {
     var db = new Dictionary<string, object>();
     foreach (var entry in entries)
     {
-        string coverUrl;
-        if (extraUrls.TryGetValue(entry.GameId, out string? extraUrl))
-        {
-            coverUrl = extraUrl;
-        }
-        else
-        {
-            coverUrl = $"{CoverArtBaseUrl}{entry.GameId}.jpg";
-        }
-
+        string coverUrl = extraUrls.TryGetValue(entry.GameId, out string? extraUrl) ? extraUrl : $"{CoverArtBaseUrl}{entry.GameId}.jpg";
         db[entry.GameId] = new
         {
             name = entry.Title,
@@ -208,8 +212,37 @@ static void GenerateDatabaseJson(string outputFile, List<RedumpEntry> entries, D
     Console.WriteLine($"✔️ {outputFile} generado con {db.Count} entradas.");
 }
 
+static void GenerateIndividualFiles(List<RedumpEntry> entries, Dictionary<string, string> extraUrls, string outputDir, string console, Dictionary<string, object> index)
+{
+    foreach (var entry in entries)
+    {
+        string coverUrl = extraUrls.TryGetValue(entry.GameId, out string? extraUrl) ? extraUrl : $"{CoverArtBaseUrl}{entry.GameId}.jpg";
+        var gameData = new
+        {
+            name = entry.Title,
+            discNumber = entry.DiscNumber,
+            coverUrl,
+            console
+        };
+
+        string fileName = $"{entry.GameId}.json";
+        string filePath = Path.Combine(outputDir, fileName);
+        File.WriteAllText(filePath, JsonSerializer.Serialize(gameData, new JsonSerializerOptions { WriteIndented = true }));
+
+        // Añadir al índice
+        index[entry.GameId] = new
+        {
+            name = entry.Title,
+            console,
+            jsonPath = $"{console}/{fileName}",
+            cfgPath = $"cfg/{entry.GameId}.cfg"
+        };
+    }
+    Console.WriteLine($"✔️ Archivos individuales generados en {outputDir} ({entries.Count} juegos)");
+}
+
 // ==================================================
-// CLASE DE DATOS MEJORADA
+// CLASE DE DATOS
 // ==================================================
 public class RedumpEntry
 {
