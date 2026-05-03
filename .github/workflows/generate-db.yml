@@ -27,6 +27,27 @@ jobs:
           mkdir -p Data/cfg_database
           cp -r PS2-OPL-CFG-Database-master/CFG_en/* Data/cfg_database/
 
+      - name: Build extra URLs from PSX Datacenter
+        run: |
+          echo "Descargando GameDB de PSX Datacenter..."
+          wget -O Data/gamedb_psx.json "https://psxdatacenter.com/psxdata/games.html" 2>/dev/null || echo "No se pudo descargar PSX Datacenter"
+          
+          python3 - << 'EOF'
+          import json, os
+          if not os.path.exists("Data/gamedb_psx.json"):
+              print("No hay datos extra PS1.")
+              exit(0)
+          with open("Data/gamedb_psx.json", "r") as f:
+              db = json.load(f)
+          extra = {}
+          for gameid, data in db.items():
+              if "cover_url" in data:
+                  extra[gameid.upper().replace("-","_")] = data["cover_url"]
+          with open("Data/extra_urls.json", "w") as f:
+              json.dump(extra, f, indent=2)
+          print(f"Generado extra_urls.json con {len(extra)} URLs de PS1")
+          EOF
+
       - name: Run generator
         run: dotnet run --project POPSManager.DBGenerator
 
