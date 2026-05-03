@@ -4,16 +4,17 @@ using System.Text.RegularExpressions;
 using System.Xml;
 
 // ============================================================
-// Puedes dejar estas rutas como constantes o leerlas de args
+// CONFIGURACIÓN
 // ============================================================
 const string dataPath = "Data";
 const string outputPath = "Output";
 static readonly string CfgSourceDir = Path.Combine(dataPath, "cfg_database");
 static readonly string Ps1DatFile = Path.Combine(dataPath, "psx.dat");
 static readonly string Ps2DatFile = Path.Combine(dataPath, "ps2.dat");
-
-// URL base de las carátulas (mirror de OPL Manager)
 const string CoverArtBaseUrl = "https://archive.org/download/oplm-art-2023-11/ART/";
+
+// Archivo opcional con URLs alternativas (GameFAQs, etc.)
+static readonly string ExtraUrlsFile = Path.Combine(dataPath, "extra_urls.json");
 
 // --------------------------------------------------
 // 1. Preparar directorios de salida
@@ -28,13 +29,24 @@ List<RedumpEntry> ps1Entries = ParseRedumpDat(Ps1DatFile);
 List<RedumpEntry> ps2Entries = ParseRedumpDat(Ps2DatFile);
 
 // --------------------------------------------------
-// 3. Generar los archivos JSON mejorados
+// 3. Cargar URLs extra si existen
 // --------------------------------------------------
-GenerateDatabaseJson(Path.Combine(outputPath, "ps1db.json"), ps1Entries);
-GenerateDatabaseJson(Path.Combine(outputPath, "ps2db.json"), ps2Entries);
+Dictionary<string, string> extraUrls = LoadExtraUrls(ExtraUrlsFile);
 
 // --------------------------------------------------
-// 4. Copiar archivos .cfg
+// 4. Ajustar discos múltiples y URLs finales
+// --------------------------------------------------
+ps1Entries = AdjustDiscNumbers(ps1Entries);
+ps2Entries = AdjustDiscNumbers(ps2Entries);
+
+// --------------------------------------------------
+// 5. Generar los archivos JSON mejorados
+// --------------------------------------------------
+GenerateDatabaseJson(Path.Combine(outputPath, "ps1db.json"), ps1Entries, extraUrls);
+GenerateDatabaseJson(Path.Combine(outputPath, "ps2db.json"), ps2Entries, extraUrls);
+
+// --------------------------------------------------
+// 6. Copiar archivos .cfg
 // --------------------------------------------------
 if (Directory.Exists(CfgSourceDir))
 {
@@ -50,7 +62,7 @@ else
 }
 
 // --------------------------------------------------
-// 5. Empaquetar en ZIP
+// 7. Empaquetar en ZIP
 // --------------------------------------------------
 string zipPath = "POPSManager_DB.zip";
 if (File.Exists(zipPath)) File.Delete(zipPath);
@@ -81,7 +93,7 @@ static List<RedumpEntry> ParseRedumpDat(string filePath)
         string id = gameNode.Attributes?["name"]?.Value ?? "";
         string rawTitle = gameNode.SelectSingleNode("description")?.InnerText ?? id;
 
-        // Extraer número de disco si el título contiene "(Disc X)" o "(Disc X of Y)"
+        // Número de disco desde "(Disc X)"
         int discNumber = 1;
         string cleanTitle = rawTitle;
 
@@ -89,11 +101,10 @@ static List<RedumpEntry> ParseRedumpDat(string filePath)
         if (discMatch.Success)
         {
             discNumber = int.Parse(discMatch.Groups[1].Value);
-            // Eliminar la parte "(Disc X)" del título
             cleanTitle = Regex.Replace(rawTitle, @"\s*\(Disc\s*\d+(?:\s*of\s*\d+)?\)\s*", "", RegexOptions.IgnoreCase).Trim();
         }
 
-        // El Game ID se toma del campo <serial>, si no existe usamos el atributo "id"
+        // Game ID desde <serial>
         string serial = gameNode.SelectSingleNode("serial")?.InnerText ?? "";
         string gameId = serial.Split(' ')[0].Trim();
         if (string.IsNullOrWhiteSpace(gameId)) gameId = id;
@@ -102,7 +113,8 @@ static List<RedumpEntry> ParseRedumpDat(string filePath)
         {
             GameId = gameId,
             Title = string.IsNullOrWhiteSpace(cleanTitle) ? rawTitle : cleanTitle,
-            DiscNumber = discNumber
+            DiscNumber = discNumber,
+            Serial = serial
         });
     }
 
@@ -110,14 +122,79 @@ static List<RedumpEntry> ParseRedumpDat(string filePath)
 }
 
 /// <summary>
-/// Genera el archivo JSON con las entradas de juegos.
+/// Ajusta discos múltiples agrupando por título base y seriales consecutivos.
 /// </summary>
-static void GenerateDatabaseJson(string outputFile, List<RedumpEntry> entries)
+static List<RedumpEntry> AdjustDiscNumbers(List<RedumpEntry> entries)
+{
+    // Agrupar por título normalizado (sin versión, sin región si se desea)
+    var groups = entries
+        .Where(e => !string.IsNullOrEmpty(e.Title))
+        .GroupBy(e => NormalizeTitleForGrouping(e.Title))
+        .Where(g => g.Count() > 1);
+
+    foreach (var group in groups)
+    {
+        // Ordenar por Game ID o por serial para asignar discNumber secuencial
+        var sorted = group.OrderBy(e => e.GameId).ToList();
+        for (int i = 0; i < sorted.Count; i++)
+        {
+            // Solo si aún no tiene discNumber > 1 desde el título
+            if (sorted[i].DiscNumber == 1)
+                sorted[i].DiscNumber = i + 1;
+        }
+    }
+
+    return entries;
+}
+
+/// <summary>
+/// Normaliza el título para agrupar variantes de discos (ignora mayúsculas y ciertas palabras).
+/// </summary>
+static string NormalizeTitleForGrouping(string title)
+{
+    if (string.IsNullOrWhiteSpace(title)) return "";
+    string norm = title.ToUpperInvariant()
+        .Replace("THE ", "")
+        .Replace("A ", "")
+        .Replace("AN ", "");
+    return norm.Trim();
+}
+
+/// <summary>
+/// Carga URLs de carátulas alternativas desde un JSON { "GAMEID": "url" }.
+/// </summary>
+static Dictionary<string, string> LoadExtraUrls(string filePath)
+{
+    if (!File.Exists(filePath))
+    {
+        Console.WriteLine("ℹ️ No se encontró extra_urls.json, usando solo mirror OPL.");
+        return new Dictionary<string, string>();
+    }
+
+    string json = File.ReadAllText(filePath);
+    var dict = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+    Console.WriteLine($"✔️ Cargadas {dict?.Count ?? 0} URLs extra.");
+    return dict ?? new Dictionary<string, string>();
+}
+
+/// <summary>
+/// Genera el archivo JSON con las entradas de juegos, usando URLs extra si están disponibles.
+/// </summary>
+static void GenerateDatabaseJson(string outputFile, List<RedumpEntry> entries, Dictionary<string, string> extraUrls)
 {
     var db = new Dictionary<string, object>();
     foreach (var entry in entries)
     {
-        string coverUrl = $"{CoverArtBaseUrl}{entry.GameId}.jpg";
+        string coverUrl;
+        if (extraUrls.TryGetValue(entry.GameId, out string? extraUrl))
+        {
+            coverUrl = extraUrl;
+        }
+        else
+        {
+            coverUrl = $"{CoverArtBaseUrl}{entry.GameId}.jpg";
+        }
+
         db[entry.GameId] = new
         {
             name = entry.Title,
@@ -132,11 +209,12 @@ static void GenerateDatabaseJson(string outputFile, List<RedumpEntry> entries)
 }
 
 // ==================================================
-// CLASE DE DATOS
+// CLASE DE DATOS MEJORADA
 // ==================================================
 public class RedumpEntry
 {
     public string GameId { get; set; } = "";
     public string Title { get; set; } = "";
     public int DiscNumber { get; set; } = 1;
+    public string Serial { get; set; } = "";
 }
