@@ -1,6 +1,6 @@
 using POPSManager.DBGenerator.Core.Interfaces;
 using POPSManager.DBGenerator.Core.Models;
-using System.Text.RegularExpressions;
+using POPSManager.DBGenerator.Infrastructure.Parsers;
 
 namespace POPSManager.DBGenerator.Application.Pipeline;
 
@@ -9,25 +9,29 @@ public class DatabaseGenerationPipeline
     private readonly IEnumerable<IGameSource> _sources;
     private readonly ICoverProvider _coverProvider;
     private readonly ITranslator _translator;
-    private readonly Dictionary<string, string> _translationCache;
     private readonly string _cacheFilePath;
+    private readonly string _cfgSourceDir;
+    private Dictionary<string, string> _translationCache;
+    private readonly string[] _targetLanguages = { "es", "fr", "de", "it", "ja" }; // configurable
 
     public DatabaseGenerationPipeline(
         IEnumerable<IGameSource> sources,
         ICoverProvider coverProvider,
         ITranslator translator,
-        string translationCacheFilePath)
+        string translationCacheFilePath,
+        string cfgSourceDir)
     {
         _sources = sources;
         _coverProvider = coverProvider;
         _translator = translator;
         _cacheFilePath = translationCacheFilePath;
         _translationCache = LoadTranslationCache(_cacheFilePath);
+        _cfgSourceDir = cfgSourceDir;
     }
 
     public async Task<List<GameEntry>> BuildAsync()
     {
-        // 1. Cargar todos los juegos de las fuentes
+        // 1. Cargar fuentes
         var allGames = new List<GameEntry>();
         foreach (var source in _sources)
         {
@@ -35,66 +39,157 @@ public class DatabaseGenerationPipeline
             allGames.AddRange(games);
         }
 
-        // 2. Normalizar IDs (mayúsculas, guiones bajos)
+        // 2. Normalizar IDs
         foreach (var game in allGames)
         {
             game.GameId = game.GameId.ToUpperInvariant().Replace("-", "_");
         }
 
-        // 3. Fusionar por GameId único (primera fuente prevalece)
+        // 3. Fusionar por GameId único
         var uniqueGames = allGames
             .GroupBy(g => g.GameId)
             .Select(g => g.First())
             .ToList();
 
-        // 4. Enriquecer: traducción y covers
-        uniqueGames = await EnrichWithTranslation(uniqueGames);
+        // 4. Enriquecer con datos CFG (necesario antes de traducir descripciones)
+        EnrichWithCfgData(uniqueGames);
+
+        // 5. Enriquecer con traducciones (multilenguaje)
+        await EnrichWithTranslations(uniqueGames);
+
+        // 6. Enriquecer con covers
         EnrichWithCovers(uniqueGames);
 
-        // 5. Post-procesar: detección de discos múltiples
+        // 7. Post-procesar discos
         uniqueGames = AdjustDiscNumbers(uniqueGames);
 
-        SaveTranslationCache(_cacheFilePath);
+        SaveTranslationCache();
 
         return uniqueGames;
     }
 
-    private async Task<List<GameEntry>> EnrichWithTranslation(List<GameEntry> games)
+    private void EnrichWithCfgData(List<GameEntry> games)
+    {
+        if (!Directory.Exists(_cfgSourceDir))
+        {
+            Console.WriteLine("⚠️ Carpeta de CFG no encontrada, omitiendo enriquecimiento.");
+            return;
+        }
+
+        int enriched = 0;
+        foreach (var game in games)
+        {
+            string cfgFile = Path.Combine(_cfgSourceDir, $"{game.GameId}.cfg");
+            if (!File.Exists(cfgFile))
+                continue;
+
+            var cfgData = CfgParser.Parse(cfgFile);
+            CfgParser.ApplyToGameEntry(game, cfgData);
+            enriched++;
+        }
+        Console.WriteLine($"  📋 {enriched} juegos enriquecidos con datos CFG.");
+    }
+
+    private async Task EnrichWithTranslations(List<GameEntry> games)
     {
         int newTranslations = 0;
         foreach (var game in games)
         {
-            if (_translationCache.TryGetValue(game.Title, out var cached))
+            // Título principal al español (para mantener compatibilidad)
+            if (!_translationCache.TryGetValue($"title_es_{game.Title}", out var cachedTitleEs))
             {
-                game.TranslatedTitle = cached != game.Title ? cached : null;
-                continue;
-            }
-
-            try
-            {
-                var translated = await _translator.TranslateAsync(game.Title);
+                var translated = await _translator.TranslateAsync(game.Title, "en", "es");
                 if (!string.IsNullOrEmpty(translated) && translated != game.Title)
                 {
-                    _translationCache[game.Title] = translated;
+                    _translationCache[$"title_es_{game.Title}"] = translated;
                     game.TranslatedTitle = translated;
                     newTranslations++;
-                    Console.WriteLine($"  ✓ {game.GameId}: {translated}");
                 }
                 else
                 {
-                    _translationCache[game.Title] = game.Title;
+                    _translationCache[$"title_es_{game.Title}"] = game.Title;
                 }
             }
-            catch
+            else
             {
-                _translationCache[game.Title] = game.Title;
+                game.TranslatedTitle = cachedTitleEs != game.Title ? cachedTitleEs : null;
             }
 
-            if (newTranslations % 10 == 0)
+            // Títulos en otros idiomas
+            foreach (var lang in _targetLanguages.Except(new[] { "es" }))
+            {
+                string cacheKey = $"title_{lang}_{game.Title}";
+                if (!_translationCache.TryGetValue(cacheKey, out var cachedTitle))
+                {
+                    var translated = await _translator.TranslateAsync(game.Title, "en", lang);
+                    if (!string.IsNullOrEmpty(translated) && translated != game.Title)
+                    {
+                        _translationCache[cacheKey] = translated;
+                        game.TranslatedTitles[lang] = translated;
+                    }
+                    else
+                    {
+                        _translationCache[cacheKey] = game.Title;
+                    }
+                    await Task.Delay(200); // pausa entre peticiones
+                }
+                else if (cachedTitle != game.Title)
+                {
+                    game.TranslatedTitles[lang] = cachedTitle;
+                }
+            }
+
+            // Descripción en español (principal)
+            if (!string.IsNullOrEmpty(game.Description))
+            {
+                string descCacheKey = $"desc_es_{game.Description}";
+                if (!_translationCache.TryGetValue(descCacheKey, out var cachedDescEs))
+                {
+                    var translatedDesc = await _translator.TranslateAsync(game.Description, "en", "es");
+                    if (!string.IsNullOrEmpty(translatedDesc) && translatedDesc != game.Description)
+                    {
+                        _translationCache[descCacheKey] = translatedDesc;
+                        game.TranslatedDescriptions["es"] = translatedDesc;
+                    }
+                    else
+                    {
+                        _translationCache[descCacheKey] = game.Description;
+                    }
+                }
+                else if (cachedDescEs != game.Description)
+                {
+                    game.TranslatedDescriptions["es"] = cachedDescEs;
+                }
+
+                // Descripciones en otros idiomas
+                foreach (var lang in _targetLanguages.Except(new[] { "es" }))
+                {
+                    string descLangKey = $"desc_{lang}_{game.Description}";
+                    if (!_translationCache.TryGetValue(descLangKey, out var cachedDescLang))
+                    {
+                        var translatedDescLang = await _translator.TranslateAsync(game.Description, "en", lang);
+                        if (!string.IsNullOrEmpty(translatedDescLang) && translatedDescLang != game.Description)
+                        {
+                            _translationCache[descLangKey] = translatedDescLang;
+                            game.TranslatedDescriptions[lang] = translatedDescLang;
+                        }
+                        else
+                        {
+                            _translationCache[descLangKey] = game.Description;
+                        }
+                        await Task.Delay(200);
+                    }
+                    else if (cachedDescLang != game.Description)
+                    {
+                        game.TranslatedDescriptions[lang] = cachedDescLang;
+                    }
+                }
+            }
+
+            if (newTranslations % 5 == 0)
                 await Task.Delay(1000);
         }
-        Console.WriteLine($"  📝 {newTranslations} nuevos títulos traducidos.");
-        return games;
+        Console.WriteLine($"  🌐 {newTranslations} nuevos títulos traducidos al español.");
     }
 
     private void EnrichWithCovers(List<GameEntry> games)
@@ -143,9 +238,9 @@ public class DatabaseGenerationPipeline
         return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new();
     }
 
-    private void SaveTranslationCache(string filePath)
+    private void SaveTranslationCache()
     {
         string json = System.Text.Json.JsonSerializer.Serialize(_translationCache, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(filePath, json);
+        File.WriteAllText(_cacheFilePath, json);
     }
 }
