@@ -7,14 +7,13 @@ public class MyMemoryTranslator : ITranslator
 {
     private readonly HttpClient _httpClient = new();
 
-    public async Task<string?> TranslateAsync(string text)
+    public async Task<string?> TranslateAsync(string text, string sourceLang, string targetLang)
     {
         if (string.IsNullOrWhiteSpace(text))
             return text;
 
-        // MyMemory limita a 500 bytes por petición, truncamos a 400 para margen
         string truncatedText = text.Length > 400 ? text[..400] : text;
-        string url = $"https://api.mymemory.translated.net/get?q={Uri.EscapeDataString(truncatedText)}&langpair=en|es";
+        string url = $"https://api.mymemory.translated.net/get?q={Uri.EscapeDataString(truncatedText)}&langpair={sourceLang}|{targetLang}";
 
         try
         {
