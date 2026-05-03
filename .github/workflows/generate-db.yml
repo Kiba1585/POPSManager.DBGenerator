@@ -27,12 +27,11 @@ jobs:
           mkdir -p Data/cfg_database
           cp -r PS2-OPL-CFG-Database-master/CFG_en/* Data/cfg_database/
 
-      - name: Build extra URLs from PSX Datacenter
+      - name: Build extra URLs from GameDB-PSX
         run: |
-          echo "Descargando GameDB de PSX Datacenter..."
-          wget -O Data/gamedb_psx.json "https://psxdatacenter.com/psxdata/games.html" 2>/dev/null || echo "No se pudo descargar PSX Datacenter"
-          
-          python3 - << 'EOF'
+          echo "Intentando descargar GameDB de GameDB-PSX..."
+          if wget -O Data/gamedb_psx.json "https://github.com/niemasd/GameDB-PSX/releases/latest/download/PSX.data.json" 2>/dev/null; then
+            python3 - << 'EOF'
           import json, os
           if not os.path.exists("Data/gamedb_psx.json"):
               print("No hay datos extra PS1.")
@@ -47,6 +46,9 @@ jobs:
               json.dump(extra, f, indent=2)
           print(f"Generado extra_urls.json con {len(extra)} URLs de PS1")
           EOF
+          else
+            echo "No se pudo descargar GameDB-PSX, se omite la ampliación de URLs."
+          fi
 
       - name: Run generator
         run: dotnet run --project POPSManager.DBGenerator
