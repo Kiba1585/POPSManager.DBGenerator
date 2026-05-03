@@ -20,7 +20,7 @@ var gameSources = new List<POPSManager.DBGenerator.Core.Interfaces.IGameSource>
     new RedumpParser(ps2Dat, "ps2")
 };
 
-// PROVEEDORES DE CARÁTULAS (orden de prioridad)
+// PROVEEDORES DE CARÁTULAS
 var coverProvider = new FallbackCoverProvider(
     new ExtraUrlsCoverProvider(extraUrlsFile),
     new OplCoverProvider()
@@ -30,7 +30,7 @@ var coverProvider = new FallbackCoverProvider(
 var translator = new MyMemoryTranslator();
 
 // PIPELINE
-var pipeline = new DatabaseGenerationPipeline(gameSources, coverProvider, translator, translationCacheFile);
+var pipeline = new DatabaseGenerationPipeline(gameSources, coverProvider, translator, translationCacheFile, cfgSourceDir);
 var games = await pipeline.BuildAsync();
 
 // BUILDERS
