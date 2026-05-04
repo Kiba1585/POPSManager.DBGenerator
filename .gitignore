@@ -1,5 +1,12 @@
 bin/
 obj/
 Output/
-Data/
 *.zip
+
+# Ignorar todo dentro de Data/ excepto cfg_database/ y los datfiles
+Data/*
+!Data/cfg_database/
+!Data/psx.dat
+!Data/ps2.dat
+!Data/extra_urls.json
+!Data/translation_cache.json
