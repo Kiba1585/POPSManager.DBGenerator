@@ -8,8 +8,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write      # necesario para hacer commit de los CFGs actualizados
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -19,12 +24,32 @@ jobs:
       - name: Datfiles already in repository
         run: echo "Usando datfiles locales en POPSManager.DBGenerator/Data/"
 
-      - name: Download OPL CFG Database
+      - name: Download and update OPL CFG Database
         run: |
-          wget -O cfg.zip "https://github.com/Tom-Bruise/PS2-OPL-CFG-Database/archive/refs/heads/master.zip"
-          unzip cfg.zip
-          mkdir -p Data/cfg_database
-          cp -r PS2-OPL-CFG-Database-master/CFG_en/* Data/cfg_database/
+          echo "Intentando descargar la última versión de los CFG..."
+          if wget -O cfg.zip "https://github.com/Tom-Bruise/PS2-OPL-CFG-Database/archive/refs/heads/master.zip" 2>/dev/null; then
+            echo "✅ Descarga exitosa. Reemplazando CFGs locales..."
+            rm -rf Data/cfg_database
+            unzip -o cfg.zip
+            mkdir -p Data/cfg_database
+            cp -r PS2-OPL-CFG-Database-master/CFG_en/* Data/cfg_database/
+            rm -rf PS2-OPL-CFG-Database-master cfg.zip
+            
+            # Detectar cambios y hacer commit si los hay
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add Data/cfg_database/
+            if git diff --staged --quiet; then
+              echo "📁 No hay cambios en los CFGs."
+            else
+              echo "📁 Cambios detectados, haciendo commit..."
+              git commit -m "Actualización automática de CFGs [skip ci]"
+              git push origin main
+              echo "✅ CFGs actualizados en el repositorio."
+            fi
+          else
+            echo "⚠️ No se pudo descargar la fuente externa. Usando CFGs locales existentes."
+          fi
 
       - name: Build extra URLs from GameDB-PSX
         run: |
