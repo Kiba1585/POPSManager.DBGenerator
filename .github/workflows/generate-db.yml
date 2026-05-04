@@ -16,7 +16,6 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      # Los datfiles ya están en el repositorio (Data/psx.dat y Data/ps2.dat)
       - name: Datfiles already in repository
         run: echo "Usando datfiles locales en POPSManager.DBGenerator/Data/"
 
@@ -52,6 +51,36 @@ jobs:
 
       - name: Run generator
         run: dotnet run --project POPSManager.DBGenerator
+
+      - name: Validate generated JSON
+        run: |
+          echo "Validando integridad de los JSON..."
+          python3 - << 'EOF'
+          import json, os, sys
+          errors = []
+          for f in ["Output/ps1db.json", "Output/ps2db.json"]:
+              if not os.path.exists(f):
+                  errors.append(f"Falta {f}")
+                  continue
+              with open(f, "r") as fh:
+                  data = json.load(fh)
+                  if not isinstance(data, dict):
+                      errors.append(f"{f} no es un diccionario")
+                  elif len(data) < 100:
+                      errors.append(f"{f} tiene muy pocos juegos ({len(data)})")
+          for f in ["Output/db/index.json"]:
+              if not os.path.exists(f):
+                  errors.append(f"Falta {f}")
+                  continue
+              with open(f, "r") as fh:
+                  data = json.load(fh)
+                  if not isinstance(data, dict) or len(data) < 100:
+                      errors.append(f"Index inválido o con pocos juegos")
+          if errors:
+              print("Errores:", errors)
+              sys.exit(1)
+          print("✅ JSON válidos")
+          EOF
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
