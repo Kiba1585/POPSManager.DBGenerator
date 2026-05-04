@@ -1,0 +1,116 @@
+name: Generate DB
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'   # el día 1 de cada mes
+  workflow_dispatch:       # permite ejecución manual desde Actions
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # necesario para hacer commit de los CFGs actualizados
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Datfiles already in repository
+        run: echo "Usando datfiles locales en POPSManager.DBGenerator/Data/"
+
+      - name: Download and update OPL CFG Database
+        run: |
+          echo "Intentando descargar la última versión de los CFG..."
+          if wget -O cfg.zip "https://github.com/Tom-Bruise/PS2-OPL-CFG-Database/archive/refs/heads/master.zip" 2>/dev/null; then
+            echo "✅ Descarga exitosa. Reemplazando CFGs locales..."
+            rm -rf Data/cfg_database
+            unzip -o cfg.zip
+            mkdir -p Data/cfg_database
+            cp -r PS2-OPL-CFG-Database-master/CFG_en/* Data/cfg_database/
+            rm -rf PS2-OPL-CFG-Database-master cfg.zip
+            
+            # Detectar cambios y hacer commit si los hay
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add Data/cfg_database/
+            if git diff --staged --quiet; then
+              echo "📁 No hay cambios en los CFGs."
+            else
+              echo "📁 Cambios detectados, haciendo commit..."
+              git commit -m "Actualización automática de CFGs [skip ci]"
+              git push origin main
+              echo "✅ CFGs actualizados en el repositorio."
+            fi
+          else
+            echo "⚠️ No se pudo descargar la fuente externa. Usando CFGs locales existentes."
+          fi
+
+      - name: Build extra URLs from GameDB-PSX
+        run: |
+          echo "Intentando descargar GameDB de GameDB-PSX..."
+          if wget -O Data/gamedb_psx.json "https://github.com/niemasd/GameDB-PSX/releases/latest/download/PSX.data.json" 2>/dev/null; then
+            python3 - << 'EOF'
+          import json, os
+          if not os.path.exists("Data/gamedb_psx.json"):
+              print("No hay datos extra PS1.")
+              exit(0)
+          with open("Data/gamedb_psx.json", "r") as f:
+              db = json.load(f)
+          extra = {}
+          for gameid, data in db.items():
+              if "cover_url" in data:
+                  extra[gameid.upper().replace("-","_")] = data["cover_url"]
+          with open("Data/extra_urls.json", "w") as f:
+              json.dump(extra, f, indent=2)
+          print(f"Generado extra_urls.json con {len(extra)} URLs de PS1")
+          EOF
+          else
+            echo "No se pudo descargar GameDB-PSX, se omite la ampliación de URLs."
+          fi
+
+      - name: Run generator
+        run: dotnet run --project POPSManager.DBGenerator
+
+      - name: Validate generated JSON
+        run: |
+          echo "Validando integridad de los JSON..."
+          python3 - << 'EOF'
+          import json, os, sys
+          errors = []
+          for f in ["Output/ps1db.json", "Output/ps2db.json"]:
+              if not os.path.exists(f):
+                  errors.append(f"Falta {f}")
+                  continue
+              with open(f, "r") as fh:
+                  data = json.load(fh)
+                  if not isinstance(data, dict):
+                      errors.append(f"{f} no es un diccionario")
+                  elif len(data) < 100:
+                      errors.append(f"{f} tiene muy pocos juegos ({len(data)})")
+          for f in ["Output/db/index.json"]:
+              if not os.path.exists(f):
+                  errors.append(f"Falta {f}")
+                  continue
+              with open(f, "r") as fh:
+                  data = json.load(fh)
+                  if not isinstance(data, dict) or len(data) < 100:
+                      errors.append(f"Index inválido o con pocos juegos")
+          if errors:
+              print("Errores:", errors)
+              sys.exit(1)
+          print("✅ JSON válidos")
+          EOF
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: db-${{ github.run_number }}
+          files: |
+            POPSManager_DB.zip
+            POPSManager_DB_individual.zip
