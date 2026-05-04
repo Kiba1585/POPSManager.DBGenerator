@@ -211,7 +211,3 @@ Kiba1585 — GitHub
 Generado con ❤️ para la comunidad de jugadores de PS1 y PS2.
 
 ```
-
----
-
-Este README refleja fielmente la arquitectura actual, explica el pipeline, los formatos de salida, cómo usarlo y cómo consumirlo desde apps cliente. ¿Quieres que añada alguna sección adicional (como capturas de pantalla, ejemplos de uso en Android, o un apartado de solución de problemas comunes)?
