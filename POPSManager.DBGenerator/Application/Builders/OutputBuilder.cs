@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using POPSManager.DBGenerator.Core.Models;
+using POPSManager.DBGenerator.Infrastructure.Parsers;
 
 namespace POPSManager.DBGenerator.Application.Builders;
 
@@ -29,6 +30,9 @@ public class OutputBuilder
         Directory.CreateDirectory(_dbCfgDir);
     }
 
+    // ------------------------------------------------
+    // MÉTODO PRINCIPAL (recibe la lista de juegos del pipeline)
+    // ------------------------------------------------
     public void GenerateAll(List<GameEntry> entries)
     {
         var indexData = new Dictionary<string, object>();
@@ -42,15 +46,21 @@ public class OutputBuilder
         GenerateIndividualFiles(ps1, _dbPs1Dir, "ps1", indexData);
         GenerateIndividualFiles(ps2, _dbPs2Dir, "ps2", indexData);
 
+        // Guardar índice
         string indexPath = Path.Combine(_dbOutputDir, "index.json");
         File.WriteAllText(indexPath, JsonSerializer.Serialize(indexData, new JsonSerializerOptions { WriteIndented = true }));
 
-        CopyConfigFiles();
+        // Copiar y enriquecer/crear CFGs (pasándole la lista completa)
+        CopyConfigFiles(entries);
 
+        // Empaquetar
         ZipFile.CreateFromDirectory(_outputPath, "POPSManager_DB.zip", CompressionLevel.Optimal, false);
         ZipFile.CreateFromDirectory(_dbOutputDir, "POPSManager_DB_individual.zip", CompressionLevel.Optimal, false);
     }
 
+    // ------------------------------------------------
+    // GENERACIÓN DE JSON COMPLETO (con multi-idioma)
+    // ------------------------------------------------
     private void GenerateFullJson(string filePath, List<GameEntry> entries)
     {
         var dict = new Dictionary<string, object>();
@@ -98,6 +108,9 @@ public class OutputBuilder
         Console.WriteLine($"✔️ {filePath} generado con {dict.Count} entradas.");
     }
 
+    // ------------------------------------------------
+    // ARCHIVOS INDIVIDUALES
+    // ------------------------------------------------
     private void GenerateIndividualFiles(List<GameEntry> entries, string outDir, string console, Dictionary<string, object> index)
     {
         foreach (var g in entries)
@@ -110,7 +123,6 @@ public class OutputBuilder
                 ["console"] = console
             };
 
-            // Nombres multi-idioma
             if (g.TranslatedTitles.Count > 0)
             {
                 var names = new Dictionary<string, string> { ["en"] = g.Title };
@@ -151,7 +163,10 @@ public class OutputBuilder
         Console.WriteLine($"✔️ Archivos individuales generados en {outDir} ({entries.Count} juegos)");
     }
 
-    private void CopyConfigFiles()
+    // ------------------------------------------------
+    // COPIA Y ENRIQUECIMIENTO/CRECCIÓN DE CFGs
+    // ------------------------------------------------
+    private void CopyConfigFiles(List<GameEntry> allEntries)
     {
         if (!Directory.Exists(_cfgSourceDir))
         {
@@ -159,13 +174,86 @@ public class OutputBuilder
             return;
         }
 
+        var entryDict = allEntries.ToDictionary(e => e.GameId, e => e);
+        int enriched = 0, created = 0;
+
+        // Procesar los CFGs existentes (enriquecerlos si faltan campos)
         foreach (string cfgFile in Directory.GetFiles(_cfgSourceDir, "*.cfg"))
         {
+            string gameId = Path.GetFileNameWithoutExtension(cfgFile);
+            var cfgData = CfgParser.Parse(cfgFile);
+
+            if (entryDict.TryGetValue(gameId, out var gameEntry))
+            {
+                bool modified = false;
+                if (!cfgData.ContainsKey("title") && !string.IsNullOrEmpty(gameEntry.TranslatedTitle ?? gameEntry.Title))
+                {
+                    cfgData["title"] = gameEntry.TranslatedTitle ?? gameEntry.Title;
+                    modified = true;
+                }
+                if (!cfgData.ContainsKey("genre") && !string.IsNullOrEmpty(gameEntry.Genre))
+                {
+                    cfgData["genre"] = gameEntry.Genre;
+                    modified = true;
+                }
+                if (!cfgData.ContainsKey("players") && !string.IsNullOrEmpty(gameEntry.Players))
+                {
+                    cfgData["players"] = gameEntry.Players;
+                    modified = true;
+                }
+                if (!cfgData.ContainsKey("developer") && !string.IsNullOrEmpty(gameEntry.Developer))
+                {
+                    cfgData["developer"] = gameEntry.Developer;
+                    modified = true;
+                }
+                if (!cfgData.ContainsKey("release") && !string.IsNullOrEmpty(gameEntry.ReleaseDate))
+                {
+                    cfgData["release"] = gameEntry.ReleaseDate;
+                    modified = true;
+                }
+                if (!cfgData.ContainsKey("description") && !string.IsNullOrEmpty(gameEntry.Description))
+                {
+                    cfgData["description"] = gameEntry.Description;
+                    modified = true;
+                }
+                if (modified) enriched++;
+            }
+
+            // Escribir el CFG (enriquecido o no) a las dos salidas
             string destFile = Path.Combine(_outputPath, "CFG", Path.GetFileName(cfgFile));
-            File.Copy(cfgFile, destFile, overwrite: true);
+            WriteCfgFile(destFile, cfgData);
 
             string indiFile = Path.Combine(_dbCfgDir, Path.GetFileName(cfgFile));
-            File.Copy(cfgFile, indiFile, overwrite: true);
+            WriteCfgFile(indiFile, cfgData);
+        }
+
+        // Crear CFGs mínimos para juegos que no tienen archivo .cfg en la fuente
+        foreach (var gameEntry in allEntries.Where(e => !File.Exists(Path.Combine(_cfgSourceDir, $"{e.GameId}.cfg"))))
+        {
+            var minCfg = new Dictionary<string, string>
+            {
+                ["title"] = gameEntry.TranslatedTitle ?? gameEntry.Title,
+                ["disc"] = gameEntry.DiscNumber.ToString()
+            };
+
+            string newCfgFile = Path.Combine(_outputPath, "CFG", $"{gameEntry.GameId}.cfg");
+            WriteCfgFile(newCfgFile, minCfg);
+
+            string indiNewCfgFile = Path.Combine(_dbCfgDir, $"{gameEntry.GameId}.cfg");
+            WriteCfgFile(indiNewCfgFile, minCfg);
+            created++;
+        }
+
+        Console.WriteLine($"  📄 CFGs enriquecidos: {enriched}, nuevos: {created}");
+    }
+
+    // Método auxiliar para escribir un archivo .cfg
+    private void WriteCfgFile(string filePath, Dictionary<string, string> data)
+    {
+        using var writer = new StreamWriter(filePath);
+        foreach (var (key, value) in data)
+        {
+            writer.WriteLine($"{key}={value}");
         }
     }
 }
