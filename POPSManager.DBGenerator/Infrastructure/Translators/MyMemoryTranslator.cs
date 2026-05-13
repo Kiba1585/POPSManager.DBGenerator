@@ -6,6 +6,7 @@ namespace POPSManager.DBGenerator.Infrastructure.Translators;
 public class MyMemoryTranslator : ITranslator
 {
     private readonly HttpClient _httpClient = new();
+    public string Name => "MyMemory";
 
     public async Task<string?> TranslateAsync(string text, string sourceLang, string targetLang)
     {
@@ -25,10 +26,7 @@ public class MyMemoryTranslator : ITranslator
                 return translatedText.GetString();
             }
         }
-        catch
-        {
-            // Silencioso
-        }
+        catch { }
         return null;
     }
 }
