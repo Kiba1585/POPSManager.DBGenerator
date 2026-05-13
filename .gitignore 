@@ -3,7 +3,7 @@ obj/
 Output/
 *.zip
 
-# Ignorar todo dentro de Data/ excepto cfg_database/ y los datfiles
+# Ignorar todo dentro de Data/ excepto lo necesario
 Data/*
 !Data/cfg_database/
 !Data/psx.dat
