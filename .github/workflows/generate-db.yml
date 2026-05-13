@@ -5,11 +5,15 @@ on:
     - cron: '0 0 1 * *'   # el día 1 de cada mes
   workflow_dispatch:       # permite ejecución manual desde Actions
 
+concurrency:
+  group: generate-db
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write      # necesario para hacer commit/push de los CFGs actualizados
+      contents: write      # necesario para hacer commit de CFGs y caché
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,19 +43,15 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             
-            # Mostrar estado actual de Git
             git status
-            git add Data/cfg_database/
+            git add Data/cfg_database/ Data/translation_cache.json
             
-            # Si no hay cambios, terminamos sin error
             if git diff --staged --quiet; then
-              echo "📁 No hay cambios en los CFGs."
+              echo "📁 No hay cambios en los CFGs ni en la caché."
             else
               echo "📁 Cambios detectados, haciendo commit..."
-              git commit -m "Actualización automática de CFGs [skip ci]"
-              echo "Intentando push..."
-              # Si el push falla, damos un mensaje pero no detenemos el workflow
-              git push origin main || echo "⚠️ Push fallido (protección de rama o permisos). Los CFGs se usarán localmente en esta ejecución."
+              git commit -m "Actualización automática de CFGs y caché de traducción [skip ci]"
+              git push origin main || echo "⚠️ Push fallido (protección de rama o permisos). Los cambios se usarán localmente en esta ejecución."
             fi
           else
             echo "⚠️ No se pudo descargar la fuente externa. Usando CFGs locales existentes."
