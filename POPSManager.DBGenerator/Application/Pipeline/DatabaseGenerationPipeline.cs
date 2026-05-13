@@ -12,7 +12,9 @@ public class DatabaseGenerationPipeline
     private readonly string _cacheFilePath;
     private readonly string _cfgSourceDir;
     private Dictionary<string, string> _translationCache;
-    private readonly string[] _targetLanguages = { "es", "fr", "de", "it", "ja" }; // configurable
+    
+    // Reducido a español para no exceder el límite de 6 horas
+    private readonly string[] _targetLanguages = { "es" };
 
     public DatabaseGenerationPipeline(
         IEnumerable<IGameSource> sources,
@@ -51,10 +53,10 @@ public class DatabaseGenerationPipeline
             .Select(g => g.First())
             .ToList();
 
-        // 4. Enriquecer con datos CFG (necesario antes de traducir descripciones)
+        // 4. Enriquecer con datos CFG
         EnrichWithCfgData(uniqueGames);
 
-        // 5. Enriquecer con traducciones (multilenguaje)
+        // 5. Enriquecer con traducciones (solo español)
         await EnrichWithTranslations(uniqueGames);
 
         // 6. Enriquecer con covers
@@ -95,7 +97,7 @@ public class DatabaseGenerationPipeline
         int newTranslations = 0;
         foreach (var game in games)
         {
-            // Título principal al español (para mantener compatibilidad)
+            // Título al español
             if (!_translationCache.TryGetValue($"title_es_{game.Title}", out var cachedTitleEs))
             {
                 var translated = await _translator.TranslateAsync(game.Title, "en", "es");
@@ -115,31 +117,7 @@ public class DatabaseGenerationPipeline
                 game.TranslatedTitle = cachedTitleEs != game.Title ? cachedTitleEs : null;
             }
 
-            // Títulos en otros idiomas
-            foreach (var lang in _targetLanguages.Except(new[] { "es" }))
-            {
-                string cacheKey = $"title_{lang}_{game.Title}";
-                if (!_translationCache.TryGetValue(cacheKey, out var cachedTitle))
-                {
-                    var translated = await _translator.TranslateAsync(game.Title, "en", lang);
-                    if (!string.IsNullOrEmpty(translated) && translated != game.Title)
-                    {
-                        _translationCache[cacheKey] = translated;
-                        game.TranslatedTitles[lang] = translated;
-                    }
-                    else
-                    {
-                        _translationCache[cacheKey] = game.Title;
-                    }
-                    await Task.Delay(200); // pausa entre peticiones
-                }
-                else if (cachedTitle != game.Title)
-                {
-                    game.TranslatedTitles[lang] = cachedTitle;
-                }
-            }
-
-            // Descripción en español (principal)
+            // Descripción al español (si existe)
             if (!string.IsNullOrEmpty(game.Description))
             {
                 string descCacheKey = $"desc_es_{game.Description}";
@@ -160,34 +138,10 @@ public class DatabaseGenerationPipeline
                 {
                     game.TranslatedDescriptions["es"] = cachedDescEs;
                 }
-
-                // Descripciones en otros idiomas
-                foreach (var lang in _targetLanguages.Except(new[] { "es" }))
-                {
-                    string descLangKey = $"desc_{lang}_{game.Description}";
-                    if (!_translationCache.TryGetValue(descLangKey, out var cachedDescLang))
-                    {
-                        var translatedDescLang = await _translator.TranslateAsync(game.Description, "en", lang);
-                        if (!string.IsNullOrEmpty(translatedDescLang) && translatedDescLang != game.Description)
-                        {
-                            _translationCache[descLangKey] = translatedDescLang;
-                            game.TranslatedDescriptions[lang] = translatedDescLang;
-                        }
-                        else
-                        {
-                            _translationCache[descLangKey] = game.Description;
-                        }
-                        await Task.Delay(200);
-                    }
-                    else if (cachedDescLang != game.Description)
-                    {
-                        game.TranslatedDescriptions[lang] = cachedDescLang;
-                    }
-                }
             }
 
-            if (newTranslations % 5 == 0)
-                await Task.Delay(1000);
+            if (newTranslations % 10 == 0)
+                await Task.Delay(500);
         }
         Console.WriteLine($"  🌐 {newTranslations} nuevos títulos traducidos al español.");
     }
