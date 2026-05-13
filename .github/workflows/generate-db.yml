@@ -28,6 +28,9 @@ jobs:
       - name: Datfiles already in repository
         run: echo "Usando datfiles locales en POPSManager.DBGenerator/Data/"
 
+      # ──────────────────────────────────────────────
+      # 1. Descargar CFGs y actualizarlos en el repo
+      # ──────────────────────────────────────────────
       - name: Download and update OPL CFG Database
         run: |
           set -x
@@ -44,19 +47,22 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             
             git status
-            git add Data/cfg_database/ Data/translation_cache.json
+            git add Data/cfg_database/
             
             if git diff --staged --quiet; then
-              echo "📁 No hay cambios en los CFGs ni en la caché."
+              echo "📁 No hay cambios en los CFGs."
             else
-              echo "📁 Cambios detectados, haciendo commit..."
-              git commit -m "Actualización automática de CFGs y caché de traducción [skip ci]"
-              git push origin main || echo "⚠️ Push fallido (protección de rama o permisos). Los cambios se usarán localmente en esta ejecución."
+              echo "📁 Cambios detectados, haciendo commit de CFGs..."
+              git commit -m "Actualización automática de CFGs [skip ci]"
+              git push origin main || echo "⚠️ Push fallido (protección de rama o permisos). Los CFGs se usarán localmente en esta ejecución."
             fi
           else
             echo "⚠️ No se pudo descargar la fuente externa. Usando CFGs locales existentes."
           fi
 
+      # ──────────────────────────────────────────────
+      # 2. Generar URLs extra desde GameDB-PSX
+      # ──────────────────────────────────────────────
       - name: Build extra URLs from GameDB-PSX
         run: |
           echo "Intentando descargar GameDB de GameDB-PSX..."
@@ -80,9 +86,35 @@ jobs:
             echo "No se pudo descargar GameDB-PSX, se omite la ampliación de URLs."
           fi
 
+      # ──────────────────────────────────────────────
+      # 3. Ejecutar el generador (crea translation_cache.json)
+      # ──────────────────────────────────────────────
       - name: Run generator
         run: dotnet run --project POPSManager.DBGenerator
 
+      # ──────────────────────────────────────────────
+      # 4. Subir la caché de traducción al repositorio
+      # ──────────────────────────────────────────────
+      - name: Commit translation cache
+        run: |
+          if [ -f Data/translation_cache.json ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add Data/translation_cache.json
+            if git diff --staged --quiet; then
+              echo "📁 No hay cambios en la caché de traducción."
+            else
+              echo "📁 Cambios detectados en la caché, haciendo commit..."
+              git commit -m "Actualizar caché de traducción [skip ci]"
+              git push origin main || echo "⚠️ Push fallido. La caché se usará localmente en esta ejecución."
+            fi
+          else
+            echo "ℹ️ No se encontró translation_cache.json (posiblemente aún no se ha generado)."
+          fi
+
+      # ──────────────────────────────────────────────
+      # 5. Validar JSON generados
+      # ──────────────────────────────────────────────
       - name: Validate generated JSON
         run: |
           echo "Validando integridad de los JSON..."
@@ -113,6 +145,9 @@ jobs:
           print("✅ JSON válidos")
           EOF
 
+      # ──────────────────────────────────────────────
+      # 6. Publicar Release
+      # ──────────────────────────────────────────────
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
